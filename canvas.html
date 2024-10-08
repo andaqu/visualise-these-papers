@@ -1,0 +1,391 @@
+
+<div id="loadingScreen" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: rgba(255, 255, 255, 0.8); padding: 20px; z-index: 10000; display: none;">
+    <h2>Loading...</h2>
+</div>
+<div id="infoBox" style="position: fixed; top: 20px; right: 20px; width: 300px; padding: 10px; background-color: white; border: 1px solid black; display: none;"></div>
+<!-- Add a search box -->
+<input id="searchBox" type="text" placeholder="Search..." style="position: fixed; top: 20px; left: 20px; width: 300px; padding: 5px; z-index: 9999;">
+<ul id="searchResults" style="position: fixed; top: 50px; left: 20px; width: 300px; background-color: white; border: 1px solid black; padding: 0; margin: 0; list-style: none; z-index: 9999; display: none;"></ul>
+
+<script type="text/javascript">
+    document.addEventListener("DOMContentLoaded", function() {
+        var categoryOvals = {};
+        var originalNodeStyles = {};
+    
+        var container = document.getElementById('mynetwork');
+        container.style.width = '100%';
+        container.style.height = '100vh';
+
+        // Show loading screen
+        document.getElementById('loadingScreen').style.display = 'block';
+    
+        // Function to ensure edges with weight > 1 are hidden
+        function hideHeavyEdgesInitially() {
+            var edgesToUpdate = network.body.data.edges.get().map(function(edge) {
+                return {
+                    id: edge.id,
+                    hidden: edge.value > 1 ? false : true
+                };
+            });
+            network.body.data.edges.update(edgesToUpdate);
+        }
+
+        network.once("stabilizationIterationsDone", function() {
+            network.setOptions({ physics: false });
+            hideHeavyEdgesInitially();
+            updateCategoryOvals();
+            network.setOptions({ physics: true });
+            
+            // Hide loading screen
+            document.getElementById('loadingScreen').style.display = 'none';
+            
+            // Set default zoom level
+            network.moveTo({ scale: 0.5 }); // Adjust the scale value as needed
+        });
+        // Function to update the bounding box for each category
+        function updateCategoryOvals() {
+            var nodesByCategory = {};
+    
+            for (var nodeId in network.body.nodes) {
+                var node = network.body.nodes[nodeId];
+                var categories = node.options.categories_data;
+    
+                if (categories) {
+                    categories = categories.split(', ');
+    
+                    categories.forEach(function(category) {
+                        if (!nodesByCategory[category]) {
+                            nodesByCategory[category] = [];
+                        }
+                        nodesByCategory[category].push(node);
+                    });
+                }
+            }
+    
+            for (var category in nodesByCategory) {
+                var nodes = nodesByCategory[category];
+    
+                if (nodes.length <= 1) {
+                    continue;
+                }
+    
+                var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    
+                nodes.forEach(function(node) {
+                    var nodePosition = network.canvasToDOM({ x: node.x, y: node.y });
+                    var nodeSize = node.options.size || 10;
+                    var addition = 30;
+    
+                    minX = Math.min(minX, nodePosition.x - nodeSize / 2 - addition);
+                    maxX = Math.max(maxX, nodePosition.x + nodeSize / 2 + addition);
+                    minY = Math.min(minY, nodePosition.y - nodeSize / 2 - addition);
+                    maxY = Math.max(maxY, nodePosition.y + nodeSize / 2 + addition);
+                });
+    
+                if (!categoryOvals[category]) {
+                    var curvyRect = document.createElement("div");
+                    curvyRect.style.position = "absolute";
+                    curvyRect.style.border = "1px solid rgba(0, 0, 0, 0.2)";
+                    curvyRect.style.zIndex = "0";
+                    curvyRect.style.pointerEvents = "none";
+                    curvyRect.style.backgroundColor = 'rgba(100, 100, 250, 0.05)'; // Reduced opacity
+                    document.body.appendChild(curvyRect);
+                    categoryOvals[category] = curvyRect;
+                }
+    
+                var curvyRect = categoryOvals[category];
+    
+                var width = maxX - minX;
+                var height = maxY - minY;
+    
+                curvyRect.style.width = width + "px";
+                curvyRect.style.height = height + "px";
+                curvyRect.style.left = minX + "px";
+                curvyRect.style.top = minY + "px";
+    
+                if (!curvyRect.categoryLabel) {
+                    var categoryLabel = document.createElement("div");
+                    categoryLabel.style.position = "absolute";
+                    categoryLabel.style.bottom = "5px";
+                    categoryLabel.style.right = "5px";
+                    categoryLabel.style.zIndex = "1";
+                    categoryLabel.style.backgroundColor = categoriesColors[category];
+                    categoryLabel.style.color = "white";
+                    categoryLabel.style.textShadow = "1px 1px 0 rgba(0, 0, 0, 0.5), -1px -1px 0 rgba(0, 0, 0, 0.5), 1px -1px 0 rgba(0, 0, 0, 0.5), -1px 1px 0 rgba(0, 0, 0, 0.5)";
+                    categoryLabel.style.padding = "2px";
+                    categoryLabel.style.opacity = "1"; // Ensure the label stays fully opaque
+                    curvyRect.appendChild(categoryLabel);
+                    curvyRect.categoryLabel = categoryLabel;
+                }
+    
+                curvyRect.categoryLabel.innerText = category;
+            }
+        }
+    
+        // Add call to hideHeavyEdgesInitially during initial setup
+        network.once("stabilizationIterationsDone", function() {
+            network.setOptions({ physics: false });
+            hideHeavyEdgesInitially();
+            updateCategoryOvals();
+            network.setOptions({ physics: true });
+        });
+    
+        // Update edge visibility when needed
+        network.on("zoom", function() {
+            updateCategoryOvals();
+        });
+    
+        network.on("dragEnd", function() {
+            updateCategoryOvals();
+        });
+    
+        network.on("afterDrawing", function() {
+            updateCategoryOvals();
+        });
+    
+        window.addEventListener("resize", function() {
+            updateCategoryOvals();
+        });
+
+        function highlightCategoryNodes(category) {
+            resetNetworkVisibility();
+
+            network.body.data.nodes.update(network.body.data.nodes.get().map(function(node) {
+                var nodeCategories = node.categories_data.split(', ');
+                return {
+                    id: node.id,
+                    hidden: !nodeCategories.includes(category),
+                    opacity: nodeCategories.includes(category) ? 1 : 0.5
+                };
+            }));
+
+
+
+            network.body.data.edges.update(network.body.data.edges.get().map(function(edge) {
+                var edgeFromNode = network.body.nodes[edge.from];
+                var edgeToNode = network.body.nodes[edge.to];
+                var edgeFromCategories = edgeFromNode.options.categories_data.split(', ');
+                var edgeToCategories = edgeToNode.options.categories_data.split(', ');
+
+                return {
+                    id: edge.id,
+                    hidden: !(edgeFromCategories.includes(category) || edgeToCategories.includes(category)) || edge.value <= 1
+                };
+            }));
+
+            for (var ovalCategory in categoryOvals) {
+                if (ovalCategory !== category) {
+                    categoryOvals[ovalCategory].style.display = 'none';
+                }
+            }
+        }
+        
+        function resetNetworkVisibility() {
+            network.body.data.nodes.update(network.body.data.nodes.get().map(function(node) {
+                return {
+                    id: node.id,
+                    hidden: false,
+                    opacity: 1
+                };
+            }));
+    
+            network.body.data.edges.update(network.body.data.edges.get().map(function(edge) {
+                return {
+                    id: edge.id,
+                    hidden: edge.value > 1 ? false : true,
+                    opacity: 1
+                };
+            }));
+    
+            for (var category in categoryOvals) {
+                if (categoryOvals[category]) {
+                    categoryOvals[category].style.display = 'block';
+                }
+            }
+        }
+    
+        network.on("click", function(params) {
+            if (params.nodes.length > 0) {
+                var nodeId = params.nodes[0];
+                var clickedNode = network.body.nodes[nodeId];
+                var clickedCategories = clickedNode.options.categories_data.split(', ');
+    
+                if (Object.keys(originalNodeStyles).length === 0) {
+                    network.body.data.nodes.get().forEach(function(node) {
+                        originalNodeStyles[node.id] = {
+                            hidden: node.hidden,
+                            opacity: node.opacity || 1
+                        };
+                    });
+                }
+    
+                network.body.data.nodes.update(network.body.data.nodes.get().map(function(node) {
+                    return {
+                        id: node.id,
+                        hidden: true,
+                        opacity: 0.5
+                    };
+                }));
+    
+                network.body.data.edges.update(network.body.data.edges.get().map(function(edge) {
+                    return {
+                        id: edge.id,
+                        hidden: true,
+                        opacity: 0.5
+                    };
+                }));
+    
+                const nodesToUpdate = Object.values(network.body.nodes).filter(node => 
+                    node.options.categories_data && 
+                    node.options.categories_data.split(', ').some(cat => clickedCategories.includes(cat))
+                ).map(node => ({
+                    id: node.id,
+                    hidden: false,
+                    opacity: 1
+                }));
+                network.body.data.nodes.update(nodesToUpdate);
+    
+                const edgesToUpdate = Object.values(network.body.edges).filter(edge => {
+                    const edgeFromNode = network.body.nodes[edge.options.from];
+                    const edgeToNode = network.body.nodes[edge.options.to];
+                    return (edgeFromNode.options.categories_data.split(', ').some(cat => clickedCategories.includes(cat)) ||
+                            edgeToNode.options.categories_data.split(', ').some(cat => clickedCategories.includes(cat))) &&
+                           edge.options.value > 1;
+                }).map(edge => ({
+                    id: edge.id,
+                    hidden: false,
+                    opacity: 1
+                }));
+                network.body.data.edges.update(edgesToUpdate);
+    
+                clickedCategories.forEach(category => {
+                    if (categoryOvals[category]) {
+                        categoryOvals[category].style.display = 'block';
+                    }
+                });
+    
+                for (var ovalCategory in categoryOvals) {
+                    if (!clickedCategories.includes(ovalCategory)) {
+                        categoryOvals[ovalCategory].style.display = 'none';
+                    }
+                }
+    
+                var infoBox = document.getElementById('infoBox');
+
+                infoBox.innerHTML =
+                '<h3>' + clickedNode.options.title_data + '</h3>' +
+                '<p><strong>Goal:</strong> ' + clickedNode.options.goal_data + '</p>' +
+                '<button id="copyPathButton">Copy Local Path</button>' +
+                '<span id="tickMark" style="color: green; display: none; margin-left: 10px;">&#10003;</span>'; // Green tick span
+
+                document.getElementById('copyPathButton').addEventListener('click', function() {
+                const path = `C:/Users/andrew/Desktop/Main/Development/highlight-this-paper/papers/highlighted/${clickedNode.options.label}.pdf`;
+
+                navigator.clipboard.writeText(path).then(function() {
+                    // Show the green tick after successful copy
+                    document.getElementById('tickMark').style.display = 'inline';
+                }).catch(function(err) {
+                    console.error('Could not copy text: ', err);
+                });
+                });
+
+                infoBox.style.display = 'block';
+                infoBox.style.zIndex = '9999';
+
+
+            } else {
+                resetNetworkVisibility();
+    
+                var infoBox = document.getElementById('infoBox');
+                infoBox.style.display = 'none';
+            }
+        });
+    
+        // Search functionality
+        var searchBox = document.getElementById("searchBox");
+        var searchResults = document.getElementById("searchResults");
+    
+        // Search functionality
+        searchBox.addEventListener("input", function() {
+            var query = searchBox.value.toLowerCase().trim();
+            var results = [];
+    
+            // Clear previous results
+            searchResults.innerHTML = '';
+            searchResults.style.display = 'none';
+    
+            if (query === '') return; // No search if query is empty
+    
+            // Handle "Category: <category_name>" search
+            if (query.startsWith("category: ")) {
+                var categoryQuery = query.replace("category: ", "").trim();
+                if (categoryQuery === '') {
+                    return;  // Do not show results while typing "Category:"
+                }
+    
+                for (var category in categoryOvals) {
+                    if (category.toLowerCase().includes(categoryQuery)) {
+                        results.push({ type: 'category', name: category });
+                    }
+                }
+    
+                if (results.length > 0) {
+                    searchResults.style.display = 'block';
+                    results.forEach(function(result) {
+                        var listItem = document.createElement("li");
+                        listItem.textContent = 'Category: ' + result.name;
+                        listItem.style.padding = "5px";
+                        listItem.style.cursor = "pointer";
+                        listItem.addEventListener("click", function() {
+                            searchBox.value = result.name;
+                            highlightCategoryNodes(result.name);
+                            searchResults.style.display = 'none';  // Hide the search results
+                        });
+                        searchResults.appendChild(listItem);
+                    });
+                }
+    
+                return;  // Skip paper search
+            }
+    
+            // Fuzzy match for nodes by title, id, or link
+            var queryTerms = query.split(' ');
+    
+            network.body.data.nodes.forEach(function(node) {
+                var title = node.title_data.toLowerCase();
+                var id = node.id.toLowerCase();
+                var link = node.link_data.toLowerCase();
+                var categories = node.categories_data.toLowerCase();
+    
+                // Check if query matches any part of title, id, or link
+                var match = queryTerms.some(term => 
+                    title.includes(term) || 
+                    id.includes(term) || 
+                    link.includes(term)
+                );
+    
+                if (match) {
+                    results.push({ type: 'node', id: node.id, title: node.title_data });
+                }
+            });
+    
+            // Display results
+            if (results.length > 0) {
+                searchResults.style.display = 'block';
+                results.forEach(function(result) {
+                    var listItem = document.createElement("li");
+                    listItem.textContent = result.title;
+                    listItem.style.padding = "5px";
+                    listItem.style.cursor = "pointer";
+                    listItem.addEventListener("click", function() {
+                        searchBox.value = result.title;  // Fill the search box with the clicked result
+                        network.selectNodes([result.id], true);  // Select the node
+                        network.focus(result.id, { scale: 0.8 }); // Zoom in on the selected node
+                        searchResults.style.display = 'none';  // Hide the search results
+                    });
+                    searchResults.appendChild(listItem);
+                });
+            }
+        });
+    });
+</script>   
